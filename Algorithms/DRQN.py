@@ -12,23 +12,21 @@ from keras.layers import Dense, LSTM
 from keras.optimizers import Adam
 import matplotlib.pyplot as plt
 import sys
-import config
 import time
 from Algorithms.algorithms import encode_input_nn
 
 # Define the agent that is going to be used for training
 class DRQNAgent:
-    def __init__(self, state_features, action_size, trace_length, model='', gamma=config.gamma,
-                 learning_rate=config.learning_rate_dqn, decay=config.epsilon_decay_dqn):
+    def __init__(self, state_features, action_size, trace_length, config, model=''):
         # Define state and action space sizes
         self.state_features = state_features
         self.action_size = action_size
         self.trace_length=trace_length
         # Hyper-parameters for the Double-DQN architecture
-        self.discount_factor = gamma # Discount factor for Bellman equation
-        self.learning_rate = learning_rate # Learning rate for ADAM optimizer
+        self.discount_factor = config.gamma # Discount factor for Bellman equation
+        self.learning_rate = config.learning_rate_dqn # Learning rate for ADAM optimizer
         self.epsilon = 1.0 # Initial epsilon value (for epsilon greedy policy)
-        self.epsilon_decay = decay # Epsilon decay (for epsilon greedy policy)
+        self.epsilon_decay = config.epsilon_decay_dqn # Epsilon decay (for epsilon greedy policy)
         self.epsilon_min = 0.01 # Minimal epsilon value (for epsilon greedy policy)
         self.batch_size = 64 # Batch size for replay
         self.train_start = 1000 # Adds a delay, for the memory to have data before starting the training
@@ -112,7 +110,7 @@ class DRQNAgent:
         self.model.save_weights(name)
 
 
-def drqn(env, algorithm, trace_length=config.trace_length, EPISODES=config.episodes_drqn):
+def drqn(env, algorithm, trace_length, EPISODES, config):
 
     # Get size of state and action
     if algorithm == 'original':
@@ -123,7 +121,7 @@ def drqn(env, algorithm, trace_length=config.trace_length, EPISODES=config.episo
     action_size = env.action_space.n
      # Temporal dimension: length of sequence to feed the neural network
     # Create the agent
-    agent = DRQNAgent(state_size, action_size, trace_length)
+    agent = DRQNAgent(state_size, action_size, trace_length, config)
     scores, episodes, q_val = [], [], [] # To store values
     totals = np.array([])  # to store stats of the process
     transmissions = np.array([])
@@ -175,7 +173,7 @@ def drqn(env, algorithm, trace_length=config.trace_length, EPISODES=config.episo
     return agent, scores, stats
 
 
-def drqn_evaluate(env, agent, algorithm, trace_length=config.trace_length, rep=config.drqn_evaluate_reps):
+def drqn_evaluate(env, agent, algorithm, trace_length, rep):
     # Get size of state and action
     if algorithm == 'original':
         state_size = env.observation_space.n
@@ -192,8 +190,7 @@ def drqn_evaluate(env, agent, algorithm, trace_length=config.trace_length, rep=c
         done = False
         state = np.zeros([1, trace_length, state_size])
         state[0, -1, :] = encode_input_nn(algorithm, env.reset(), state_size) # Set the initial state
-        agent.model.reset_states() 
-        sys.stdout.write('\r %s %f %%' % ('Simulating : ', sim/rep*100))
+        agent.model.reset_states()
         sys.stdout.flush()
         while not done:  # Iterate while the game has not finished
             # Get action for the current state and go one step in environment

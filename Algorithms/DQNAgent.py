@@ -9,22 +9,21 @@ from keras.utils import to_categorical
 from keras.optimizers import Adam
 from collections import deque
 import numpy as np
-import config
 
 
 # Define the agent that is going to be used for training
 class DoubleDQNAgent:
-    def __init__(self, state_size, action_size, model='', gamma=config.gamma, learning_rate=config.learning_rate_dqn,
-                 decay=config.epsilon_decay_dqn):
+    def __init__(self, state_size, action_size, config, model=''):
         # Define state and action space sizes
+        self.decay = config.epsilon_decay_dqn
         self.state_size = state_size
         self.encoded = to_categorical(np.array([0, 1]))
         self.action_size = action_size
         # Hyper-parameters for the DQN architecture
-        self.discount_factor = gamma     # Discount factor for Bellman equation
-        self.learning_rate = learning_rate   # Learning rate for ADAM optimizer
+        self.discount_factor = config.gamma     # Discount factor for Bellman equation
+        self.learning_rate = config.learning_rate_dqn   # Learning rate for ADAM optimizer
         self.epsilon = 1.0      # Initial epsilon value (for epsilon greedy policy)
-        self.epsilon_decay = decay      # Epsilon decay (for epsilon greedy policy)
+        self.epsilon_decay = config.epsilon_decay_dqn      # Epsilon decay (for epsilon greedy policy)
         self.epsilon_min = 0.01     # Minimal epsilon value (for epsilon greedy policy)
         self.batch_size = 64    # Batch size for replay
         self.train_start = 1000     # Adds a delay, for the memory to have data before starting the training

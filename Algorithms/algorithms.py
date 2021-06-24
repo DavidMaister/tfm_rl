@@ -2,7 +2,6 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.ndimage import uniform_filter1d
 import time
-import config
 import os
 import copy
 os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
@@ -12,7 +11,6 @@ from keras.utils import to_categorical
 
 from Algorithms.DQNAgent import DoubleDQNAgent
 from envs.cognitive_user import CognitiveUser
-from envs.cognitive_user_extended import CognitiveUserExtended
 import random
 
 
@@ -62,55 +60,7 @@ def value_iteration(gamma, N_states, N_actions, N_steps, P, R):
     return v, q
 
 
-def q_learning_ext(env, Q, epsilon, alpha=config.alpha_ql, gamma=config.gamma, min_epsilon=config.epsilon_min_ql,
-                   epsilon_decay=config.epsilon_decay_ql):
-    P_ext_est = np.zeros_like(config.P_ext)
-    done = False
-    state = env.reset().copy()
-
-    while not done:
-        exploit_explore_tradeoff = random.uniform(0, 1)
-
-        # Choose an action following exploitation. Select the best action
-        if exploit_explore_tradeoff > epsilon:
-            action = np.argmax(Q[tuple(state)])
-
-        # instead, following the exploration. Choosing a random action
-        else:
-            action = env.action_space.sample()
-
-        state_action = np.append(state, action)
-        # Perform the action, observe the environment and get the reward
-        new_state, reward, done, info = env.step(action)
-        #print(state, action, new_state, reward)
-        ### Update the Q-table
-        Q[tuple(state_action)] = Q[tuple(state_action)] + alpha * (reward + gamma * np.max(Q[tuple(new_state)]) - Q[tuple(state_action)])
-        # Update empirical transition matrix
-        # Build estimated P_ext matrix
-        row = int(2 * state[1] + action + state[0] * config.N_states_ext)  # Row index
-        col = int(new_state[1] + new_state[0] * config.length_state)
-        P_ext_est[row, col] += 1
-        # update the state for the next iteration
-        state = new_state.copy()
-
-        # update epsilon
-        if epsilon > min_epsilon:
-            epsilon *= epsilon_decay
-
-    for row in range(P_ext_est.shape[0]):
-        norm = np.sum(P_ext_est[row, :])
-        if norm > 0:
-            P_ext_est[row, :] = P_ext_est[row, :] / norm
-    # print('Original P')
-    # print(config.P_ext)
-    # print('Estimated P')
-    # print(P_ext_est)
-    # print(config.P_ext - P_ext_est)
-    # print('\n')
-    return Q, epsilon
-
-
-def dqn(env, algorithm, EPISODES=config.episodes_dqn, train_wait=config.train_wait):
+def dqn(env, algorithm, EPISODES, train_wait, config):
     # Get size of state and action
     if algorithm == 'original':
         state_size = env.observation_space.n
@@ -121,7 +71,7 @@ def dqn(env, algorithm, EPISODES=config.episodes_dqn, train_wait=config.train_wa
 
 
     # Create the agent
-    agent = DoubleDQNAgent(state_size, action_size)
+    agent = DoubleDQNAgent(state_size, action_size, config)
     scores, episodes = [], []  # To store values for plotting
     totals = np.array([])   # to store stats of the process
     transmissions = np.array([])
@@ -193,7 +143,7 @@ def dqn(env, algorithm, EPISODES=config.episodes_dqn, train_wait=config.train_wa
     return agent, scores, stats
 
 
-def dqn_evaluate(env, agent, algorithm, rep=config.dqn_evaluate_reps):
+def dqn_evaluate(env, agent, algorithm, rep):
     # Get size of state and action
     if algorithm == 'original':
         state_size = env.observation_space.n
@@ -230,10 +180,50 @@ def dqn_evaluate(env, agent, algorithm, rep=config.dqn_evaluate_reps):
     return mean_score, stats
 
 
-def evaluate_policies(states, q_vi, ql, dqn_agent, algorithm, results_path, gamma=config.gamma, rep=config.rep_eval_pol):
-    env_vi = CognitiveUser() if algorithm == 'original' else CognitiveUserExtended()    # value iteration
-    env_ql = CognitiveUser() if algorithm == 'original' else CognitiveUserExtended()    # q learning
-    env_dqn = CognitiveUser() if algorithm == 'original' else CognitiveUserExtended()   # deep q network
+def evaluate(config, q, env, rep):
+    scores = []
+    totals = []  # to store stats of the process
+    transmissions = []
+    collisions = []
+    for e in range(rep):
+        done = False
+        score = 0
+        counter = 0
+        state = copy.deepcopy(env.reset())
+        while not done:
+            action = np.argmax(q[state, :])
+            next_state, instant_reward, done, _ = env.step(action)
+            if not config.flag_train_all:
+                score += instant_reward
+            else:
+                score += instant_reward * config.gamma ** counter
+            state = next_state.copy()
+            counter += 1
+            if done:
+                scores.append(score)
+                e_totals, e_transmissions, e_collisions = env.get_stats()
+                totals.append(e_totals)
+                transmissions.append(e_transmissions)
+                collisions.append(e_collisions)
+
+                # if not config.flag_train_all: # print stats
+                #     print("N_collisions: ", e_collisions, "N_transmission: ", e_transmissions, "N_no_transmissions: ",
+                #           env.n_rnt, "N_rp: ", env.n_rp, "N_totals: ", e_totals, "score", score)
+
+    transmissions = np.array(transmissions)
+    collisions = np.array(collisions)
+    totals = np.array(totals)
+    aux = transmissions + collisions
+    stats1 = aux / totals
+    aux[aux == 0] = 1
+    stats2 = transmissions / aux
+    return scores, stats1, stats2
+
+
+def evaluate_policies(states, q_vi, ql, dqn_agent, algorithm, results_path, gamma, rep, config):
+    env_vi = CognitiveUser(config) #if algorithm == 'original' else CognitiveUserExtended()    # value iteration
+    env_ql = CognitiveUser(config) #if algorithm == 'original' else CognitiveUserExtended()    # q learning
+    env_dqn = CognitiveUser(config) #if algorithm == 'original' else CognitiveUserExtended()   # deep q network
     scores_vi, scores_ql, scores_dqn = (np.zeros(rep), np.zeros(rep)), (np.zeros(rep), np.zeros(rep)), (np.zeros(rep), np.zeros(rep))
     totals_vi, totals_ql, totals_dqn = (np.zeros(rep), np.zeros(rep)), (np.zeros(rep), np.zeros(rep)), (np.zeros(rep), np.zeros(rep))
     tx_vi, tx_ql, tx_dqn = (np.zeros(rep), np.zeros(rep)), (np.zeros(rep), np.zeros(rep)), (np.zeros(rep), np.zeros(rep))  # transmissions
@@ -281,24 +271,33 @@ def evaluate_policies(states, q_vi, ql, dqn_agent, algorithm, results_path, gamm
     ax_eval[0][0].hist(scores_ql[0], label='Q learning', alpha=0.6, bins='auto')
     ax_eval[0][0].hist(scores_dqn[0], label='DQN', alpha=0.6, bins='auto')
     ax_eval[0][0].set_title('Value of state 0')
+    ax_eval[0][0].set_xlabel('Value')
+    ax_eval[0][0].set_ylabel('frequency')
     ax_eval[0][0].legend()
 
     ax_eval[0][1].hist(scores_vi[1], label='Value Iteration', alpha=0.7, bins='auto')
     ax_eval[0][1].hist(scores_ql[1], label='Q learning', alpha=0.6, bins='auto')
     ax_eval[0][1].hist(scores_dqn[1], label='DQN', alpha=0.6, bins='auto')
     ax_eval[0][1].set_title('Value of state 1')
+    ax_eval[0][1].set_xlabel('Value')
+    ax_eval[0][1].set_ylabel('frequency')
     ax_eval[0][1].legend()
 
     plot_stats(ax_eval[1][0], totals_vi[0], tx_vi[0], cx_vi[0], label='vi', plot_style='hist')
     plot_stats(ax_eval[1][0], totals_ql[0], tx_ql[0], cx_ql[0], label='ql', plot_style='hist')
     plot_stats(ax_eval[1][0], totals_dqn[0], tx_dqn[0], cx_dqn[0], label='dqn', plot_style='hist')
     ax_eval[1][0].set_title('Stats of state 0')
+    ax_eval[1][0].set_xlabel('ratio')
+    ax_eval[1][0].set_ylabel('frequency')
 
     plot_stats(ax_eval[1][1], totals_vi[1], tx_vi[1], cx_vi[1], label='vi', plot_style='hist')
     plot_stats(ax_eval[1][1], totals_ql[1], tx_ql[1], cx_ql[1], label='ql', plot_style='hist')
     plot_stats(ax_eval[1][1], totals_dqn[1], tx_dqn[1], cx_dqn[1], label='dqn', plot_style='hist')
     ax_eval[1][1].set_title('Stats of state 1')
+    ax_eval[1][1].set_xlabel('ratio')
+    ax_eval[1][1].set_ylabel('frequency')
     plt.savefig(results_path + 'evaluation_'+algorithm+'.png')
 
     print('\n')
+    return
 
